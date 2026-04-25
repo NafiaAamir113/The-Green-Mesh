@@ -159,60 +159,151 @@
 # """)
 
 import streamlit as st
-import google.generativeai as genai
-import json
-import time
+import pandas as pd
+import random
+from datetime import datetime
 
-# --- CONFIGURATION ---
-st.set_page_config(page_title="GreenCrisisGrid: Global AI Command", layout="wide")
-genai.configure(api_key="YOUR_GEMINI_API_KEY")
+st.set_page_config(page_title="Green Crisis Grid", layout="wide")
+
+st.title("🚀 Green Crisis Grid")
+st.subheader("AI Crisis Command Center + Agent-to-Agent Energy Trading")
 
 st.markdown("""
-    <style>
-    .stApp { background-color: #0c0d0e; color: #e1e3e6; }
-    .status-card { background: #151719; border: 1px solid #2a2d31; padding: 20px; border-radius: 10px; }
-    </style>
-""", unsafe_allow_html=True)
+This demo simulates:
+- Disaster severity analysis
+- Hospital emergency prioritization
+- Solar panel → EV charger energy trading
+- AI-generated response plan
+- Micropayment transaction logs
+""")
 
-# --- APP STATE ---
-if 'history' not in st.session_state:
-    st.session_state.history = []
+# -----------------------------
+# Sidebar Inputs
+# -----------------------------
 
-# --- UI HEADER ---
-st.title("⚡ GREEN CRISIS GRID")
-st.caption("GLOBAL MESH COORDINATION // ZULU TIME: 20:00")
+st.sidebar.header("Disaster Input")
+city = st.sidebar.text_input("City", "Faisalabad")
+disaster_type = st.sidebar.selectbox(
+    "Disaster Type",
+    ["Flood", "Earthquake", "Fire", "Heatwave", "Power Outage"]
+)
+severity = st.sidebar.slider("Severity Level", 1, 10, 7)
 
-col1, col2 = st.columns([2, 1])
+hospital_need = st.sidebar.slider("Hospital Power Need (kWh)", 10, 500, 120)
+solar_excess = st.sidebar.slider("Available Solar Energy (kWh)", 10, 500, 200)
 
-with col1:
-    st.subheader("Situation Room")
-    user_input = st.chat_input("Enter Strategic Command (e.g. 'Deploy units to Section B, optimize solar grid')")
+run_button = st.sidebar.button("Run AI Simulation")
 
-    if user_input:
-        with st.spinner("AI Agent Synthesis..."):
-            model = genai.GenerativeModel('gemini-1.5-pro')
-            prompt = f"""
-            You are GreenCrisisGrid AI. Handle this command: "{user_input}"
-            Analyze disaster reports and simulate energy trading between grid nodes.
-            Respond ONLY in JSON:
-            {{ "summary": "...", "incidents": [], "trades": [] }}
-            """
-            response = model.generate_content(prompt)
-            data = json.loads(response.text)
-            st.session_state.history.append(data)
 
-    # Display History
-    for entry in reversed(st.session_state.history):
-        with st.container():
-            st.markdown(f"**Agent GCG-01:** {entry['summary']}")
-            if entry['trades']:
-                st.info(f"🔄 Grid Arbitrage: {entry['trades']}")
+# -----------------------------
+# Helper Functions
+# -----------------------------
 
-with col2:
-    st.subheader("Grid Ledger")
-    st.metric("Mesh Health", "94%", "+2.3%")
-    st.metric("Live Trade Vol", "$4,209 USDC", "Settled")
-    
-    st.write("---")
-    st.subheader("Active Incidents")
-    st.error("INC-001: Flood Warning [Global Sector 4]")
+def generate_priority_plan(disaster, severity_score):
+    if severity_score >= 8:
+        level = "CRITICAL"
+        action = "Immediate evacuation + hospital-first resource allocation"
+    elif severity_score >= 5:
+        level = "HIGH"
+        action = "Emergency teams + medical support deployment"
+    else:
+        level = "MODERATE"
+        action = "Monitoring + preventive preparation"
+
+    return level, action
+
+
+def simulate_transactions(total_energy):
+    transactions = []
+    remaining = total_energy
+
+    while remaining > 0:
+        trade = round(min(random.uniform(1, 8), remaining), 2)
+        price = round(trade * 0.002, 4)
+        remaining -= trade
+
+        transactions.append({
+            "Time": datetime.now().strftime("%H:%M:%S"),
+            "Energy Traded (kWh)": trade,
+            "USDC Payment": price,
+            "Seller": "Solar Panel Agent",
+            "Buyer": "Hospital Grid Agent"
+        })
+
+    return pd.DataFrame(transactions)
+
+
+# -----------------------------
+# Main Simulation
+# -----------------------------
+
+if run_button:
+    st.success("AI Multi-Agent System Running...")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("## 🌍 Crisis Analysis")
+        level, action = generate_priority_plan(disaster_type, severity)
+
+        st.metric("Risk Level", level)
+        st.write(f"**City:** {city}")
+        st.write(f"**Disaster:** {disaster_type}")
+        st.write(f"**Recommended Action:** {action}")
+
+    with col2:
+        st.markdown("## ⚡ Energy Allocation")
+
+        allocated = min(hospital_need, solar_excess)
+        shortage = max(hospital_need - solar_excess, 0)
+
+        st.metric("Energy Allocated", f"{allocated} kWh")
+        st.metric("Remaining Shortage", f"{shortage} kWh")
+
+        if shortage > 0:
+            st.warning("Additional backup source required")
+        else:
+            st.success("Hospital fully powered using smart grid")
+
+    st.markdown("---")
+
+    st.markdown("## 💸 Agent-to-Agent Micropayment Transactions")
+
+    tx_df = simulate_transactions(allocated)
+    st.dataframe(tx_df, use_container_width=True)
+
+    total_payment = round(tx_df["USDC Payment"].sum(), 4)
+    st.metric("Total Settlement", f"${total_payment} USDC")
+
+    st.markdown("---")
+
+    st.markdown("## 📄 AI Generated Emergency Report")
+
+    report = f"""
+Emergency Response Report
+=========================
+
+Location: {city}
+Disaster Type: {disaster_type}
+Severity Level: {severity}/10
+Risk Status: {level}
+
+Hospital Power Need: {hospital_need} kWh
+Solar Grid Supply: {solar_excess} kWh
+Allocated Energy: {allocated} kWh
+Shortage: {shortage} kWh
+
+Recommended Government Action:
+{action}
+
+Blockchain Settlement:
+Total USDC settled between energy agents: ${total_payment}
+
+Generated by: Green Crisis Grid AI
+"""
+
+    st.text_area("Generated Report", report, height=350)
+
+else:
+    st.info("Use the sidebar and click 'Run AI Simulation' to start.")
+
