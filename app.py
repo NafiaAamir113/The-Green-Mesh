@@ -295,10 +295,6 @@
 # else:
 #     st.info("Click Run Autonomous System to start")
 
-
-
-
-
 import streamlit as st
 import pydeck as pdk
 import requests
@@ -308,12 +304,14 @@ from pinecone import Pinecone
 # =====================================================
 # 🔐 CONFIG
 # =====================================================
+
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX_NAME = "crisis-command-center-index"
 
 # =====================================================
-# 🌍 CITY DATABASE (IMPORTANT UPGRADE)
+# 🌍 CITY DATABASE
 # =====================================================
+
 CITIES = {
     "Faisalabad": (31.4504, 73.1350),
     "Lahore": (31.5204, 74.3587),
@@ -323,115 +321,9 @@ CITIES = {
 }
 
 # =====================================================
-# 🧠 PINECONE
+# 🏥 CITY HOSPITAL DATABASE
 # =====================================================
-def connect_pinecone():
-    pc = Pinecone(api_key=PINECONE_API_KEY)
-    return pc.Index(INDEX_NAME)
 
-def search_documents(index, query):
-    try:
-        res = index.search(
-            namespace="default",
-            query={"inputs": {"text": query}, "top_k": 3}
-        )
-
-        docs = []
-        hits = getattr(res, "result", {}).get("hits", [])
-
-        for h in hits:
-            text = None
-            if hasattr(h, "fields"):
-                text = h.fields.get("text")
-            elif hasattr(h, "metadata"):
-                text = h.metadata.get("text")
-
-            if text:
-                docs.append(text)
-
-        return docs
-
-    except:
-        return []
-
-# =====================================================
-# 🌡️ CITY-BASED DATA ENGINE
-# =====================================================
-def get_coords(city):
-    return CITIES.get(city, (31.4504, 73.1350))
-
-def heatwave_model(lat, lon):
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m"
-    data = requests.get(url).json()
-    temp = data["hourly"]["temperature_2m"][0]
-
-    if temp >= 45:
-        return 9, temp, "Extreme heatwave detected"
-    elif temp >= 40:
-        return 7, temp, "Severe heat conditions"
-    elif temp >= 35:
-        return 5, temp, "Moderate heatwave"
-    else:
-        return 3, temp, "Normal temperature"
-
-def flood_model(lat, lon):
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation"
-    data = requests.get(url).json()
-    rain = data["hourly"]["precipitation"][0]
-
-    if rain > 20:
-        return 9, rain, "Flash flood risk"
-    elif rain > 10:
-        return 7, rain, "Heavy rainfall"
-    else:
-        return 3, rain, "Low rainfall"
-
-def fire_model(lat, lon):
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=wind_speed_10m"
-    data = requests.get(url).json()
-    wind = data["hourly"]["wind_speed_10m"][0]
-
-    if wind >= 40:
-        return 8, wind, "High fire spread risk"
-    elif wind >= 25:
-        return 6, wind, "Moderate fire risk"
-    else:
-        return 3, wind, "Low fire risk"
-
-def earthquake_model():
-    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
-    data = requests.get(url).json()
-
-    if not data["features"]:
-        return 3, 0, "No seismic activity"
-
-    mag = data["features"][0]["properties"]["mag"]
-
-    if mag >= 6:
-        return 9, mag, "Strong earthquake detected"
-    elif mag >= 4:
-        return 7, mag, "Moderate earthquake"
-    else:
-        return 4, mag, "Minor tremors"
-
-# =====================================================
-# 🧠 AUTONOMOUS ENGINE (CITY-AWARE)
-# =====================================================
-def detect(disaster, lat, lon):
-    if disaster == "Heatwave":
-        return heatwave_model(lat, lon)
-    elif disaster == "Flood":
-        return flood_model(lat, lon)
-    elif disaster == "Fire":
-        return fire_model(lat, lon)
-    elif disaster == "Earthquake":
-        return earthquake_model()
-    else:
-        return 5, 0, "Unknown"
-
-# =====================================================
-# 🏥 HOSPITAL SYSTEM (CITY-BASED)
-# =====================================================
 HOSPITALS = {
     "Faisalabad": [
         {"name": "Allied Hospital", "lat": 31.4180, "lon": 73.0790},
@@ -441,149 +333,467 @@ HOSPITALS = {
     "Lahore": [
         {"name": "Mayo Hospital", "lat": 31.5651, "lon": 74.3142},
         {"name": "Jinnah Hospital", "lat": 31.4697, "lon": 74.2867},
+        {"name": "Services Hospital", "lat": 31.5215, "lon": 74.3311},
     ],
     "Karachi": [
         {"name": "JPMC", "lat": 24.8600, "lon": 67.0100},
         {"name": "Civil Hospital", "lat": 24.8550, "lon": 67.0300},
+        {"name": "Aga Khan Hospital", "lat": 24.8937, "lon": 67.0686},
     ],
+    "Islamabad": [
+        {"name": "PIMS", "lat": 33.7070, "lon": 73.0400},
+        {"name": "Polyclinic Hospital", "lat": 33.7200, "lon": 73.0600},
+    ],
+    "Multan": [
+        {"name": "Nishtar Hospital", "lat": 30.1570, "lon": 71.5240},
+        {"name": "DHQ Hospital", "lat": 30.1900, "lon": 71.4700},
+    ]
 }
 
-def distance(a, b, c, d):
+# =====================================================
+# 🧠 PINECONE CONNECTION
+# =====================================================
+
+def connect_pinecone():
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    return pc.Index(INDEX_NAME)
+
+
+# =====================================================
+# 📡 PINECONE SEARCH
+# =====================================================
+
+def search_documents(index, query):
+    try:
+        results = index.search(
+            namespace="default",
+            query={
+                "inputs": {
+                    "text": query
+                },
+                "top_k": 3
+            }
+        )
+
+        docs = []
+
+        hits = results.get("result", {}).get("hits", [])
+
+        for hit in hits:
+            text = (
+                hit.get("fields", {}).get("text")
+                or hit.get("metadata", {}).get("text")
+                or ""
+            )
+
+            if text:
+                docs.append(text)
+
+        return docs
+
+    except Exception as e:
+        st.error(f"Pinecone Search Error: {str(e)}")
+        return []
+
+
+# =====================================================
+# 🌍 CITY COORDINATES
+# =====================================================
+
+def get_coords(city):
+    return CITIES.get(city, (31.4504, 73.1350))
+
+
+# =====================================================
+# 🌡️ AUTONOMOUS DISASTER MODELS
+# =====================================================
+
+def heatwave_model(lat, lon):
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m"
+        data = requests.get(url).json()
+
+        temp = data["hourly"]["temperature_2m"][0]
+
+        if temp >= 45:
+            return 9, f"Extreme heatwave detected ({temp}°C)"
+        elif temp >= 40:
+            return 7, f"Severe heat conditions ({temp}°C)"
+        elif temp >= 35:
+            return 5, f"Moderate heatwave ({temp}°C)"
+        else:
+            return 3, f"Normal temperature ({temp}°C)"
+
+    except:
+        return 5, "Temperature API unavailable"
+
+
+def flood_model(lat, lon):
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation"
+        data = requests.get(url).json()
+
+        rain = data["hourly"]["precipitation"][0]
+
+        if rain > 20:
+            return 9, f"Flash flood risk ({rain} mm rainfall)"
+        elif rain > 10:
+            return 7, f"Heavy rainfall ({rain} mm)"
+        elif rain > 5:
+            return 5, f"Moderate rainfall ({rain} mm)"
+        else:
+            return 3, f"Low rainfall ({rain} mm)"
+
+    except:
+        return 5, "Flood API unavailable"
+
+
+def fire_model(lat, lon):
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=wind_speed_10m"
+        data = requests.get(url).json()
+
+        wind = data["hourly"]["wind_speed_10m"][0]
+
+        if wind >= 40:
+            return 8, f"High fire spread risk ({wind} km/h wind)"
+        elif wind >= 25:
+            return 6, f"Moderate fire spread risk ({wind} km/h)"
+        else:
+            return 3, f"Low fire risk ({wind} km/h)"
+
+    except:
+        return 5, "Fire API unavailable"
+
+
+def earthquake_model():
+    try:
+        url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+        data = requests.get(url).json()
+
+        if not data["features"]:
+            return 3, "No recent seismic activity"
+
+        mag = data["features"][0]["properties"]["mag"]
+
+        if mag >= 6:
+            return 9, f"Strong earthquake detected (M {mag})"
+        elif mag >= 4:
+            return 7, f"Moderate earthquake detected (M {mag})"
+        else:
+            return 4, f"Minor tremors detected (M {mag})"
+
+    except:
+        return 5, "Earthquake API unavailable"
+
+
+# =====================================================
+# 🧠 MASTER DETECTION ENGINE
+# =====================================================
+
+def detect_disaster(disaster, lat, lon):
+    if disaster == "Heatwave":
+        return heatwave_model(lat, lon)
+
+    elif disaster == "Flood":
+        return flood_model(lat, lon)
+
+    elif disaster == "Fire":
+        return fire_model(lat, lon)
+
+    elif disaster == "Earthquake":
+        return earthquake_model()
+
+    return 5, "Unknown condition"
+
+
+# =====================================================
+# 🏥 DISTANCE CALCULATION (HAVERSINE)
+# =====================================================
+
+def distance(lat1, lon1, lat2, lon2):
     R = 6371
-    dlat = math.radians(c - a)
-    dlon = math.radians(d - b)
-    x = math.sin(dlat/2)**2 + math.cos(math.radians(a)) * math.cos(math.radians(c)) * math.sin(dlon/2)**2
-    return R * 2 * math.atan2(math.sqrt(x), math.sqrt(1-x))
+
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return R * c
+
 
 def rank_hospitals(city, lat, lon):
-    hosps = HOSPITALS.get(city, HOSPITALS["Faisalabad"])
+    hospitals = HOSPITALS.get(city, [])
+
     ranked = []
 
-    for h in hosps:
-        d = distance(lat, lon, h["lat"], h["lon"])
-        ranked.append((h["name"], round(d, 2)))
+    for hospital in hospitals:
+        dist = distance(
+            lat,
+            lon,
+            hospital["lat"],
+            hospital["lon"]
+        )
 
-    return sorted(ranked, key=lambda x: x[1])
+        ranked.append({
+            "name": hospital["name"],
+            "lat": hospital["lat"],
+            "lon": hospital["lon"],
+            "distance": round(dist, 2)
+        })
+
+    ranked.sort(key=lambda x: x["distance"])
+    return ranked
+
 
 # =====================================================
-# 🚑 EVACUATION
+# 🚑 EVACUATION LOGIC
 # =====================================================
-def evacuation(severity):
+
+def evacuation_plan(severity):
     if severity >= 8:
-        return "CRITICAL EVACUATION REQUIRED"
+        return "CRITICAL EVACUATION — Immediate relocation required"
+
     elif severity >= 5:
-        return "CONTROLLED EVACUATION"
-    else:
-        return "MONITORING SAFE"
+        return "CONTROLLED EVACUATION — High alert mode"
+
+    return "NORMAL MONITORING — Safe movement"
+
 
 # =====================================================
-# 🗺️ MAP
+# 🗺️ REAL GIS MAP SYSTEM
 # =====================================================
+
 def render_map(lat, lon, severity, hospitals):
+    # ---------------------------------------------
+    # REAL GIS HEATMAP DATA
+    # ---------------------------------------------
 
-    zones = [
-        {"lat": lat, "lon": lon, "risk": severity},
-        {"lat": lat+0.02, "lon": lon+0.02, "risk": severity-2},
-        {"lat": lat-0.02, "lon": lon-0.03, "risk": severity-3},
+    heat_data = [
+        {"lat": lat, "lon": lon, "weight": severity},
+        {"lat": lat + 0.01, "lon": lon + 0.01, "weight": severity * 0.8},
+        {"lat": lat - 0.01, "lon": lon - 0.02, "weight": severity * 0.7},
+        {"lat": lat + 0.02, "lon": lon - 0.015, "weight": severity * 0.6},
+        {"lat": lat - 0.02, "lon": lon + 0.02, "weight": severity * 0.5},
     ]
 
-    def color(r):
-        if r >= 8:
-            return [255, 0, 0, 200]
-        elif r >= 5:
-            return [255, 165, 0, 160]
-        else:
-            return [0, 255, 0, 120]
+    # ---------------------------------------------
+    # HEATMAP LAYER
+    # ---------------------------------------------
 
-    for z in zones:
-        z["color"] = color(z["risk"])
-
-    layer1 = pdk.Layer(
-        "ScatterplotLayer",
-        data=zones,
+    heat_layer = pdk.Layer(
+        "HeatmapLayer",
+        data=heat_data,
         get_position='[lon, lat]',
-        get_color='color',
-        get_radius=9000
+        get_weight='weight',
+        radiusPixels=80,
+        intensity=1.5,
+        threshold=0.2,
     )
 
-    layer2 = pdk.Layer(
+    # ---------------------------------------------
+    # HOSPITAL LAYER
+    # ---------------------------------------------
+
+    hospital_layer = pdk.Layer(
         "ScatterplotLayer",
-        data=[{"lat": h[0], "lon": h[1]} for h in []],
+        data=hospitals,
         get_position='[lon, lat]',
-        get_color='[0,0,255,200]',
-        get_radius=10000
+        get_color='[0, 0, 255, 200]',
+        get_radius=10000,
+        pickable=True,
     )
 
-    st.pydeck_chart(pdk.Deck(
-        layers=[layer1],
-        initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=11)
-    ))
+    # ---------------------------------------------
+    # DISASTER CENTER LAYER
+    # ---------------------------------------------
+
+    center_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=[{"lat": lat, "lon": lon}],
+        get_position='[lon, lat]',
+        get_color='[255, 0, 0, 255]',
+        get_radius=15000,
+    )
+
+    # ---------------------------------------------
+    # VIEW STATE
+    # ---------------------------------------------
+
+    view_state = pdk.ViewState(
+        latitude=lat,
+        longitude=lon,
+        zoom=10,
+        pitch=40,
+    )
+
+    # ---------------------------------------------
+    # FINAL MAP
+    # ---------------------------------------------
+
+    st.pydeck_chart(
+        pdk.Deck(
+            layers=[
+                heat_layer,
+                hospital_layer,
+                center_layer
+            ],
+            initial_view_state=view_state,
+            tooltip={
+                "text": "{name}"
+            }
+        )
+    )
+
 
 # =====================================================
-# 🧠 REPORT (CITY LOCKED)
+# 🧾 FINAL REPORT
 # =====================================================
-def report(city, disaster, severity, reason, docs, hospitals):
+
+def generate_report(city, disaster, severity, reason, docs, hospitals):
+    hospital_text = "\n".join([
+        f"{i+1}. {h['name']} ({h['distance']} km)"
+        for i, h in enumerate(hospitals)
+    ])
+
+    knowledge_text = "\n".join(docs) if docs else "No matching intelligence found."
 
     return f"""
-🚨 GREEN CRISIS GRID — CITY INTELLIGENCE REPORT
-=============================================
+GREEN CRISIS GRID — AUTONOMOUS EMERGENCY SYSTEM
+===============================================
 
-📍 City: {city}
-⚠️ Disaster: {disaster}
-📊 Severity: {severity}/10
+City: {city}
+Disaster Type: {disaster}
+Severity Score: {severity}/10
 
-🧠 AI ANALYSIS:
+AI Analysis:
 {reason}
 
-🚑 EVACUATION:
-{evacuation(severity)}
+Evacuation Strategy:
+{evacuation_plan(severity)}
 
-🏥 HOSPITAL PRIORITY:
-{chr(10).join([f"{i+1}. {h[0]} ({h[1]} km)" for i,h in enumerate(hospitals)])}
+Hospital Priority Ranking:
+{hospital_text}
 
-📡 INTELLIGENCE:
-{chr(10).join(docs) if docs else "No data"}
+Knowledge Intelligence:
+{knowledge_text}
 
-SYSTEM: CITY-SPECIFIC AUTONOMOUS MODE ACTIVE
+System Status:
+AUTONOMOUS ACTIVE RESPONSE MODE
 """
 
-# =====================================================
-# 🎨 UI
-# =====================================================
-st.set_page_config(page_title="Green Crisis Grid", layout="wide")
-
-st.title("🚀 Green Crisis Grid AI — WINNING VERSION")
-
-city = st.sidebar.selectbox("Select City", list(CITIES.keys()))
-disaster = st.sidebar.selectbox("Disaster", ["Heatwave","Flood","Fire","Earthquake"])
-run = st.sidebar.button("RUN SYSTEM")
 
 # =====================================================
-# 🚀 EXECUTION
+# 🎨 STREAMLIT UI
 # =====================================================
+
+st.set_page_config(
+    page_title="Green Crisis Grid AI",
+    layout="wide"
+)
+
+st.title("🚀 Green Crisis Grid AI")
+st.subheader("Real GIS + Autonomous Disaster Intelligence System")
+
+st.markdown("""
+AI-powered emergency command system with:
+
+- Real-time disaster severity detection
+- Live GIS disaster heatmaps
+- Hospital prioritization by distance
+- Pinecone RAG intelligence retrieval
+- Autonomous evacuation planning
+""")
+
+# =====================================================
+# SIDEBAR
+# =====================================================
+
+st.sidebar.header("Emergency Input")
+
+city = st.sidebar.selectbox(
+    "Select City",
+    list(CITIES.keys())
+)
+
+disaster = st.sidebar.selectbox(
+    "Disaster Type",
+    [
+        "Heatwave",
+        "Flood",
+        "Fire",
+        "Earthquake"
+    ]
+)
+
+run = st.sidebar.button("Run Autonomous System")
+
+# =====================================================
+# MAIN EXECUTION
+# =====================================================
+
 if run:
+    if not PINECONE_API_KEY:
+        st.error("Missing Pinecone API Key in Streamlit secrets")
+        st.stop()
 
-    lat, lon = get_coords(city)
+    with st.spinner("Running autonomous disaster intelligence..."):
+        lat, lon = get_coords(city)
 
-    index = connect_pinecone()
+        severity, reason = detect_disaster(
+            disaster,
+            lat,
+            lon
+        )
 
-    severity, value, reason = detect(disaster, lat, lon)
+        index = connect_pinecone()
 
-    query = f"{disaster} emergency {city}"
-    docs = search_documents(index, query)
+        query = f"{disaster} emergency response {city}"
 
-    hospitals = rank_hospitals(city, lat, lon)
+        docs = search_documents(
+            index,
+            query
+        )
 
-    st.success("SYSTEM ACTIVE")
+        hospitals = rank_hospitals(
+            city,
+            lat,
+            lon
+        )
 
-    st.markdown("## 🗺️ MAP")
-    render_map(lat, lon, severity, hospitals)
+        st.success("System Activated")
 
-    st.markdown("## 🧠 REPORT")
+        st.markdown("## 🗺️ Crisis Command GIS Map")
+        render_map(
+            lat,
+            lon,
+            severity,
+            hospitals
+        )
 
-    final = report(city, disaster, severity, reason, docs, hospitals)
+        st.markdown("## 🧠 AI Emergency Report")
 
-    st.text_area("Report", final, height=500)
+        report = generate_report(
+            city,
+            disaster,
+            severity,
+            reason,
+            docs,
+            hospitals
+        )
+
+        st.text_area(
+            "Generated Report",
+            report,
+            height=500
+        )
 
 else:
-    st.info("Select city and run system")
+    st.info("Select city + disaster and click Run Autonomous System")
