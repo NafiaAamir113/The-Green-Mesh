@@ -1,9 +1,6 @@
 streamlit
 pinecone
-sentence-transformers
-google-generativeai 
-pandas
-json
-time
-torch
+sentence-transformers==2.7.0
+google-generativeai
+pandas==2.2.2
 
