@@ -1,4 +1,6 @@
-streamlit 
+streamlit
+pinecone
+sentence-transformers
 google-generativeai 
 pandas
 json
