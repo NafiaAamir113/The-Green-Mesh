@@ -307,12 +307,13 @@ from sentence_transformers import SentenceTransformer
 # =====================================================
 
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
+TOGETHER_API_KEY = st.secrets["TOGETHER_API_KEY"]
+
 INDEX_NAME = "crisis-command-center-index"
 
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index(INDEX_NAME)
 
-# IMPORTANT: MUST MATCH YOUR INGESTION MODEL
 model = SentenceTransformer("BAAI/bge-large-en-v1.5")
 
 # =====================================================
@@ -358,24 +359,20 @@ HOSPITALS = {
 }
 
 # =====================================================
-# 🧠 PINECONE SEARCH (FIXED)
+# 🧠 PINECONE SEARCH
 # =====================================================
 
 def search_documents(query):
     try:
-        query_vector = model.encode(
-            query,
-            normalize_embeddings=True
-        ).tolist()
+        vector = model.encode(query, normalize_embeddings=True).tolist()
 
         results = index.query(
-            vector=query_vector,
+            vector=vector,
             top_k=3,
             include_metadata=True
         )
 
         docs = []
-
         for match in results.get("matches", []):
             text = match.get("metadata", {}).get("text")
             if text:
@@ -384,7 +381,7 @@ def search_documents(query):
         return docs
 
     except Exception as e:
-        st.error(f"Pinecone Search Error: {str(e)}")
+        st.error(f"Pinecone Error: {str(e)}")
         return []
 
 # =====================================================
@@ -395,64 +392,52 @@ def get_coords(city):
     return CITIES.get(city, (31.4504, 73.1350))
 
 # =====================================================
-# 🌡️ DISASTER MODELS (UNCHANGED)
+# 🌡️ DISASTER MODELS (unchanged)
 # =====================================================
 
 def heatwave_model(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m"
         data = requests.get(url).json()
-
         temp = data["hourly"]["temperature_2m"][0]
 
         if temp >= 45:
-            return 9, f"Extreme heatwave detected ({temp}°C)"
+            return 9, f"Extreme heatwave ({temp}°C)"
         elif temp >= 40:
-            return 7, f"Severe heat conditions ({temp}°C)"
+            return 7, f"Severe heat ({temp}°C)"
         elif temp >= 35:
-            return 5, f"Moderate heatwave ({temp}°C)"
-        else:
-            return 3, f"Normal temperature ({temp}°C)"
-
+            return 5, f"Moderate heat ({temp}°C)"
+        return 3, f"Normal temperature ({temp}°C)"
     except:
-        return 5, "Temperature API unavailable"
-
+        return 5, "API error"
 
 def flood_model(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation"
         data = requests.get(url).json()
-
         rain = data["hourly"]["precipitation"][0]
 
         if rain > 20:
-            return 9, f"Flash flood risk ({rain} mm rainfall)"
+            return 9, f"Flash flood risk ({rain} mm)"
         elif rain > 10:
             return 7, f"Heavy rainfall ({rain} mm)"
-        else:
-            return 3, f"Low rainfall ({rain} mm)"
-
+        return 3, f"Low rainfall ({rain} mm)"
     except:
-        return 5, "Flood API unavailable"
-
+        return 5, "API error"
 
 def fire_model(lat, lon):
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=wind_speed_10m"
         data = requests.get(url).json()
-
         wind = data["hourly"]["wind_speed_10m"][0]
 
         if wind >= 40:
-            return 8, f"High fire risk ({wind} km/h)"
+            return 8, f"High fire risk ({wind})"
         elif wind >= 25:
-            return 6, f"Moderate fire risk ({wind} km/h)"
-        else:
-            return 3, f"Low fire risk ({wind} km/h)"
-
+            return 6, f"Moderate fire risk ({wind})"
+        return 3, f"Low fire risk ({wind})"
     except:
-        return 5, "Fire API unavailable"
-
+        return 5, "API error"
 
 def earthquake_model():
     try:
@@ -468,26 +453,23 @@ def earthquake_model():
             return 9, f"Strong earthquake (M {mag})"
         elif mag >= 4:
             return 7, f"Moderate earthquake (M {mag})"
-        else:
-            return 4, f"Minor earthquake (M {mag})"
-
+        return 4, f"Minor earthquake (M {mag})"
     except:
-        return 5, "Earthquake API unavailable"
-
+        return 5, "API error"
 
 def detect_disaster(disaster, lat, lon):
     if disaster == "Heatwave":
         return heatwave_model(lat, lon)
-    elif disaster == "Flood":
+    if disaster == "Flood":
         return flood_model(lat, lon)
-    elif disaster == "Fire":
+    if disaster == "Fire":
         return fire_model(lat, lon)
-    elif disaster == "Earthquake":
+    if disaster == "Earthquake":
         return earthquake_model()
-    return 5, "Unknown condition"
+    return 5, "Unknown"
 
 # =====================================================
-# 🏥 DISTANCE + HOSPITAL RANKING
+# 🏥 HOSPITALS
 # =====================================================
 
 def distance(lat1, lon1, lat2, lon2):
@@ -496,79 +478,92 @@ def distance(lat1, lon1, lat2, lon2):
     dlon = math.radians(lon2 - lon1)
 
     a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
+        math.sin(dlat/2)**2 +
+        math.cos(math.radians(lat1)) *
+        math.cos(math.radians(lat2)) *
+        math.sin(dlon/2)**2
     )
 
-    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
 def rank_hospitals(city, lat, lon):
     hospitals = HOSPITALS.get(city, [])
-
-    ranked = []
+    result = []
 
     for h in hospitals:
-        dist = distance(lat, lon, h["lat"], h["lon"])
-
-        ranked.append({
+        d = distance(lat, lon, h["lat"], h["lon"])
+        result.append({
             "name": h["name"],
-            "lat": h["lat"],
-            "lon": h["lon"],
-            "distance": round(dist, 2)
+            "distance": round(d, 2)
         })
 
-    return sorted(ranked, key=lambda x: x["distance"])
+    return sorted(result, key=lambda x: x["distance"])
 
 # =====================================================
-# 🚑 EVACUATION
+# 🚀 TOGETHER AI (FULL UPGRADE)
 # =====================================================
 
-def evacuation_plan(severity):
-    if severity >= 8:
-        return "CRITICAL EVACUATION — Immediate action required"
-    elif severity >= 5:
-        return "CONTROLLED EVACUATION — High alert"
-    return "NORMAL MONITORING"
+def generate_ai_report(city, disaster, severity, reason, docs, hospitals):
 
-# =====================================================
-# 🧠 REPORT
-# =====================================================
+    system_prompt = """
+You are the National Disaster Crisis Command AI of Pakistan.
 
-def generate_report(city, disaster, severity, reason, docs, hospitals):
-    hospital_text = "\n".join([
-        f"{i+1}. {h['name']} ({h['distance']} km)"
-        for i, h in enumerate(hospitals)
-    ])
+You analyze NDMA data, weather conditions, and hospital readiness.
 
-    knowledge = "\n".join(docs) if docs else "No NDMA intelligence found."
+You generate structured emergency response plans like a government EOC system.
 
-    return f"""
-GREEN CRISIS GRID — AUTONOMOUS SYSTEM
+Format:
 
-City: {city}
-Disaster: {disaster}
-Severity: {severity}/10
+1. Risk Level
+2. Situation Analysis
+3. Immediate Actions
+4. Evacuation Plan
+5. Hospital Response
+6. Government Advisory
 
-AI Analysis:
-{reason}
-
-Evacuation:
-{evacuation_plan(severity)}
-
-Hospitals:
-{hospital_text}
-
-NDMA Intelligence:
-{knowledge}
-
-STATUS: ACTIVE
+Be precise, operational, and non-generic.
 """
 
+    user_prompt = f"""
+CITY: {city}
+DISASTER: {disaster}
+SEVERITY: {severity}/10
+
+WEATHER ANALYSIS:
+{reason}
+
+NDMA DATA:
+{docs}
+
+HOSPITALS:
+{hospitals}
+"""
+
+    try:
+        response = requests.post(
+            "https://api.together.xyz/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {TOGETHER_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 1200
+            }
+        )
+
+        return response.json()["choices"][0]["message"]["content"]
+
+    except Exception as e:
+        return f"AI Error: {str(e)}"
+
 # =====================================================
-# 🖥️ STREAMLIT UI
+# 🖥️ UI
 # =====================================================
 
 st.title("🚀 Green Crisis Grid AI")
@@ -584,23 +579,21 @@ if run:
 
     severity, reason = detect_disaster(disaster, lat, lon)
 
-    query = f"""
-    {disaster} emergency in {city}
-    disaster response protocols
-    evacuation procedures
-    """
-
-    docs = search_documents(query)
-
+    docs = search_documents(f"{disaster} emergency {city}")
     hospitals = rank_hospitals(city, lat, lon)
+
+    ai_report = generate_ai_report(
+        city,
+        disaster,
+        severity,
+        reason,
+        docs,
+        hospitals
+    )
 
     st.success("System Active")
 
-    st.text_area(
-        "Report",
-        generate_report(city, disaster, severity, reason, docs, hospitals),
-        height=400
-    )
+    st.text_area("🧠 AI Crisis Report", ai_report, height=500)
 
 else:
     st.info("Select inputs and run system")
