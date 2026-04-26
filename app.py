@@ -158,9 +158,6 @@
 # 4. **Economic Viability:** Traditional gas fees would be 750x more expensive than the transaction value itself.
 # """)
 
-```python
-# app.py
-
 import streamlit as st
 from pinecone import Pinecone
 
