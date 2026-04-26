@@ -158,152 +158,217 @@
 # 4. **Economic Viability:** Traditional gas fees would be 750x more expensive than the transaction value itself.
 # """)
 
+```python
+# app.py
+
 import streamlit as st
-import pandas as pd
-import random
-from datetime import datetime
+from pinecone import Pinecone
 
-st.set_page_config(page_title="Green Crisis Grid", layout="wide")
+# =====================================================
+# STEP 1: ADD YOUR PINECONE API KEY HERE
+# =====================================================
 
-st.title("🚀 Green Crisis Grid")
-st.subheader("AI Crisis Command Center + Agent-to-Agent Energy Trading")
+PINECONE_API_KEY = "pcsk_Wj9ZQ_PBmDTQPLxpfPgzUYcKWp7bzJ4SLPfBjXwyWjax8iUUCbZdF9A3AFUS4AGLxWt29"
 
-st.markdown("""
-This demo simulates:
-- Disaster severity analysis
-- Hospital emergency prioritization
-- Solar panel → EV charger energy trading
-- AI-generated response plan
-- Micropayment transaction logs
-""")
+# Your Pinecone index name
+INDEX_NAME = "crisis-command-center-index"
 
-# -----------------------------
-# Sidebar Inputs
-# -----------------------------
+# =====================================================
+# STEP 2: CONNECT TO PINECONE
+# =====================================================
 
-st.sidebar.header("Disaster Input")
-city = st.sidebar.text_input("City", "Faisalabad")
-disaster_type = st.sidebar.selectbox(
-    "Disaster Type",
-    ["Flood", "Earthquake", "Fire", "Heatwave", "Power Outage"]
-)
-severity = st.sidebar.slider("Severity Level", 1, 10, 7)
-
-hospital_need = st.sidebar.slider("Hospital Power Need (kWh)", 10, 500, 120)
-solar_excess = st.sidebar.slider("Available Solar Energy (kWh)", 10, 500, 200)
-
-run_button = st.sidebar.button("Run AI Simulation")
+def connect_pinecone():
+    pc = Pinecone(api_key=PINECONE_API_KEY)
+    index = pc.Index(INDEX_NAME)
+    return index
 
 
-# -----------------------------
-# Helper Functions
-# -----------------------------
+# =====================================================
+# STEP 3: SEARCH DATA FROM PINECONE
+# Since your index uses integrated embedding
+# we use search() with text query directly
+# =====================================================
 
-def generate_priority_plan(disaster, severity_score):
-    if severity_score >= 8:
-        level = "CRITICAL"
-        action = "Immediate evacuation + hospital-first resource allocation"
-    elif severity_score >= 5:
-        level = "HIGH"
-        action = "Emergency teams + medical support deployment"
+def search_documents(index, query):
+    results = index.search(
+        namespace="default",
+        query={
+            "top_k": 3,
+            "inputs": {
+                "text": query
+            }
+        }
+    )
+
+    retrieved_docs = []
+
+    if "result" in results and "hits" in results["result"]:
+        for hit in results["result"]["hits"]:
+            if "fields" in hit and "text" in hit["fields"]:
+                retrieved_docs.append(hit["fields"]["text"])
+
+    return retrieved_docs
+
+
+# =====================================================
+# STEP 4: GENERATE AI REPORT
+# =====================================================
+
+def generate_report(city, disaster_type, severity, docs):
+    if severity >= 8:
+        status = "CRITICAL"
+        action = "Immediate evacuation and hospital-first emergency response required."
+
+    elif severity >= 5:
+        status = "HIGH"
+        action = "Deploy rescue teams, medical support, and emergency shelters."
+
     else:
-        level = "MODERATE"
-        action = "Monitoring + preventive preparation"
+        status = "MODERATE"
+        action = "Monitoring and preventive preparation required."
 
-    return level, action
-
-
-def simulate_transactions(total_energy):
-    transactions = []
-    remaining = total_energy
-
-    while remaining > 0:
-        trade = round(min(random.uniform(1, 8), remaining), 2)
-        price = round(trade * 0.002, 4)
-        remaining -= trade
-
-        transactions.append({
-            "Time": datetime.now().strftime("%H:%M:%S"),
-            "Energy Traded (kWh)": trade,
-            "USDC Payment": price,
-            "Seller": "Solar Panel Agent",
-            "Buyer": "Hospital Grid Agent"
-        })
-
-    return pd.DataFrame(transactions)
-
-
-# -----------------------------
-# Main Simulation
-# -----------------------------
-
-if run_button:
-    st.success("AI Multi-Agent System Running...")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("## 🌍 Crisis Analysis")
-        level, action = generate_priority_plan(disaster_type, severity)
-
-        st.metric("Risk Level", level)
-        st.write(f"**City:** {city}")
-        st.write(f"**Disaster:** {disaster_type}")
-        st.write(f"**Recommended Action:** {action}")
-
-    with col2:
-        st.markdown("## ⚡ Energy Allocation")
-
-        allocated = min(hospital_need, solar_excess)
-        shortage = max(hospital_need - solar_excess, 0)
-
-        st.metric("Energy Allocated", f"{allocated} kWh")
-        st.metric("Remaining Shortage", f"{shortage} kWh")
-
-        if shortage > 0:
-            st.warning("Additional backup source required")
-        else:
-            st.success("Hospital fully powered using smart grid")
-
-    st.markdown("---")
-
-    st.markdown("## 💸 Agent-to-Agent Micropayment Transactions")
-
-    tx_df = simulate_transactions(allocated)
-    st.dataframe(tx_df, use_container_width=True)
-
-    total_payment = round(tx_df["USDC Payment"].sum(), 4)
-    st.metric("Total Settlement", f"${total_payment} USDC")
-
-    st.markdown("---")
-
-    st.markdown("## 📄 AI Generated Emergency Report")
+    context = "\n".join(docs)
 
     report = f"""
-Emergency Response Report
-=========================
+GREEN CRISIS GRID – EMERGENCY RESPONSE REPORT
+==============================================
 
-Location: {city}
+City: {city}
 Disaster Type: {disaster_type}
 Severity Level: {severity}/10
-Risk Status: {level}
+Risk Status: {status}
 
-Hospital Power Need: {hospital_need} kWh
-Solar Grid Supply: {solar_excess} kWh
-Allocated Energy: {allocated} kWh
-Shortage: {shortage} kWh
-
-Recommended Government Action:
+Recommended Action:
 {action}
 
-Blockchain Settlement:
-Total USDC settled between energy agents: ${total_payment}
+Retrieved Emergency Knowledge:
+{context}
+
+Priority Order:
+1. Hospitals
+2. Rescue Centers
+3. Emergency Shelters
+4. Water Supply Systems
+5. General Public Areas
+
+Final Suggestion:
+Resources should be allocated immediately based on urgency,
+with hospitals receiving first priority.
 
 Generated by: Green Crisis Grid AI
 """
 
-    st.text_area("Generated Report", report, height=350)
+    return report
+
+
+# =====================================================
+# STEP 5: STREAMLIT UI
+# =====================================================
+
+st.set_page_config(
+    page_title="Green Crisis Grid",
+    layout="wide"
+)
+
+st.title("🚀 Green Crisis Grid")
+st.subheader("AI Crisis Command Center with Pinecone RAG")
+
+st.markdown("""
+This system helps governments, hospitals, and NGOs
+make instant emergency decisions during disasters.
+
+Features:
+- Disaster severity analysis
+- Pinecone RAG search
+- Emergency response recommendations
+- Hospital-first prioritization
+- AI-generated crisis report
+""")
+
+# =====================================================
+# SIDEBAR INPUTS
+# =====================================================
+
+st.sidebar.header("Emergency Input")
+
+city = st.sidebar.text_input(
+    "City",
+    "Faisalabad"
+)
+
+disaster_type = st.sidebar.selectbox(
+    "Disaster Type",
+    [
+        "Flood",
+        "Earthquake",
+        "Fire",
+        "Heatwave",
+        "Power Outage"
+    ]
+)
+
+severity = st.sidebar.slider(
+    "Severity Level",
+    1,
+    10,
+    7
+)
+
+run_button = st.sidebar.button(
+    "Run AI Simulation"
+)
+
+# =====================================================
+# MAIN LOGIC
+# =====================================================
+
+if run_button:
+
+    if "PASTE_YOUR_PINECONE_API_KEY_HERE" in PINECONE_API_KEY:
+        st.error("Please add your Pinecone API key first.")
+    else:
+        with st.spinner("Running AI Crisis Analysis..."):
+
+            index = connect_pinecone()
+
+            query = f"{disaster_type} emergency response for {city}"
+
+            retrieved_docs = search_documents(index, query)
+
+            st.success("AI Analysis Completed Successfully!")
+
+            # -----------------------------------------
+            # Retrieved Documents Section
+            # -----------------------------------------
+
+            st.markdown("## Retrieved Knowledge from Pinecone")
+
+            if retrieved_docs:
+                for doc in retrieved_docs:
+                    st.info(doc)
+            else:
+                st.warning("No matching documents found.")
+
+            # -----------------------------------------
+            # AI Generated Report
+            # -----------------------------------------
+
+            report = generate_report(
+                city,
+                disaster_type,
+                severity,
+                retrieved_docs
+            )
+
+            st.markdown("## AI Generated Emergency Report")
+
+            st.text_area(
+                "Generated Report",
+                report,
+                height=450
+            )
 
 else:
     st.info("Use the sidebar and click 'Run AI Simulation' to start.")
+
 
