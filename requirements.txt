@@ -2,3 +2,4 @@ streamlit
 pinecone
 google-generativeai
 pandas
+transfomers
