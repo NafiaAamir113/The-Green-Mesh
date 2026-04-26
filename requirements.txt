@@ -2,4 +2,4 @@ streamlit
 pinecone
 google-generativeai
 pandas
-transfomers
+sentence-transformers
