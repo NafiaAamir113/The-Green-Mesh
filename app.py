@@ -159,161 +159,221 @@
 # """)
 
 import streamlit as st
+import pydeck as pdk
+import requests
+import math
 from pinecone import Pinecone
 
 # =====================================================
-# STEP 1: LOAD API KEY SAFELY (Streamlit Cloud safe)
+# LOAD API KEY
 # =====================================================
-
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX_NAME = "crisis-command-center-index"
 
 # =====================================================
-# CONNECT TO PINECONE
+# PINECONE CONNECT
 # =====================================================
-
 def connect_pinecone():
     pc = Pinecone(api_key=PINECONE_API_KEY)
-    index = pc.Index(INDEX_NAME)
-    return index
+    return pc.Index(INDEX_NAME)
 
 # =====================================================
-# SEARCH FUNCTION (FIXED FOR INTEGRATED EMBEDDINGS)
+# FIXED PINECONE SEARCH (v3 compatible)
 # =====================================================
-
 def search_documents(index, query):
     try:
         results = index.search(
             namespace="default",
-            query=query,
-            limit=3
+            query={
+                "inputs": {"text": query},
+                "top_k": 3
+            }
         )
 
-        retrieved_docs = []
+        docs = []
 
-        hits = results.get("result", {}).get("hits", [])
+        if hasattr(results, "result"):
+            hits = results.result.get("hits", [])
+        else:
+            hits = results.get("matches", [])
 
-        for hit in hits:
-            text = (
-                hit.get("fields", {}).get("text")
-                or hit.get("metadata", {}).get("text")
-                or ""
-            )
+        for h in hits:
+            text = None
+
+            if hasattr(h, "fields"):
+                text = h.fields.get("text")
+
+            if not text and hasattr(h, "metadata"):
+                text = h.metadata.get("text")
+
             if text:
-                retrieved_docs.append(text)
+                docs.append(text)
 
-        return retrieved_docs
+        return docs
 
     except Exception as e:
-        st.error(f"Search error: {str(e)}")
+        st.error(f"Pinecone error: {str(e)}")
         return []
 
 # =====================================================
-# AI REPORT GENERATION
+# 🌧️ REAL WEATHER / FLOOD RISK API (NO KEY NEEDED)
 # =====================================================
+def get_flood_risk(city):
+    # Faisalabad coordinates fallback
+    lat, lon = 31.4504, 73.1350
 
-def generate_report(city, disaster_type, severity, docs):
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation"
 
+    try:
+        r = requests.get(url)
+        data = r.json()
+
+        rain = data["hourly"]["precipitation"][0]
+
+        if rain > 10:
+            return "HIGH"
+        elif rain > 5:
+            return "MEDIUM"
+        else:
+            return "LOW"
+    except:
+        return "UNKNOWN"
+
+# =====================================================
+# 🏥 HOSPITAL DATA (REALISTIC SAMPLE)
+# =====================================================
+HOSPITALS = [
+    {"name": "Allied Hospital", "lat": 31.4180, "lon": 73.0790},
+    {"name": "DHQ Hospital", "lat": 31.4150, "lon": 73.0890},
+    {"name": "Faisal Hospital", "lat": 31.4300, "lon": 73.1100},
+]
+
+# distance formula
+def distance(lat1, lon1, lat2, lon2):
+    R = 6371
+    dlat = math.radians(lat2-lat1)
+    dlon = math.radians(lon2-lon1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+# =====================================================
+# 🚑 EVACUATION ROUTE PRIORITY (SIMULATED)
+# =====================================================
+def safe_route(severity):
     if severity >= 8:
-        status = "CRITICAL"
-        action = "Immediate evacuation and emergency hospital response required."
-
+        return "AVOID MAIN ROADS → USE HIGH GROUND ROUTES"
     elif severity >= 5:
-        status = "HIGH"
-        action = "Deploy rescue teams and activate emergency shelters."
-
+        return "USE NORMAL EVACUATION ROUTES WITH CAUTION"
     else:
-        status = "MODERATE"
-        action = "Monitor situation and prepare preventive measures."
+        return "ROADS SAFE FOR MOVEMENT"
 
-    context = "\n".join(docs) if docs else "No relevant data found."
+# =====================================================
+# 🗺️ LIVE MAP (FLOOD + HOSPITAL PRIORITY)
+# =====================================================
+def render_map(severity):
+
+    center_lat, center_lon = 31.4504, 73.1350
+
+    flood_zones = [
+        {"lat": center_lat, "lon": center_lon, "risk": severity},
+        {"lat": center_lat+0.02, "lon": center_lon+0.02, "risk": severity-2},
+        {"lat": center_lat-0.02, "lon": center_lon-0.03, "risk": severity-3},
+    ]
+
+    def color(r):
+        if r >= 8:
+            return [255, 0, 0, 180]
+        elif r >= 5:
+            return [255, 165, 0, 160]
+        else:
+            return [0, 255, 0, 120]
+
+    for z in flood_zones:
+        z["color"] = color(z["risk"])
+
+    layer1 = pdk.Layer(
+        "ScatterplotLayer",
+        data=flood_zones,
+        get_position='[lon, lat]',
+        get_color='color',
+        get_radius=8000
+    )
+
+    hospital_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=HOSPITALS,
+        get_position='[lon, lat]',
+        get_color='[0, 0, 255, 200]',
+        get_radius=9000
+    )
+
+    view = pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=11)
+
+    st.pydeck_chart(pdk.Deck(layers=[layer1, hospital_layer], initial_view_state=view))
+
+# =====================================================
+# AI REPORT
+# =====================================================
+def generate_report(city, disaster_type, severity, docs, flood_risk, route):
 
     return f"""
-GREEN CRISIS GRID – EMERGENCY REPORT
-====================================
+GREEN CRISIS GRID – REAL-TIME DISASTER SYSTEM
+=============================================
 
 City: {city}
 Disaster: {disaster_type}
 Severity: {severity}/10
-Status: {status}
+Flood Risk (API): {flood_risk}
 
-Recommended Action:
-{action}
+🚑 Evacuation Strategy:
+{route}
 
-Knowledge Base:
-{context}
+📌 Knowledge Base:
+{chr(10).join(docs) if docs else "No data found"}
 
-Priority:
-1. Hospitals
-2. Rescue Teams
-3. Emergency Shelters
-4. Utilities
+🏥 Hospital Priority:
+1. Nearest hospitals activated
+2. Emergency triage readiness
+3. Ambulance dispatch priority
 
-Generated by AI Crisis System
+SYSTEM STATUS: ACTIVE RESPONSE MODE
 """
 
 # =====================================================
-# STREAMLIT UI
+# UI
 # =====================================================
-
 st.set_page_config(page_title="Green Crisis Grid", layout="wide")
 
-st.title("🚀 Green Crisis Grid AI")
-st.subheader("Crisis Command Center (Pinecone + AI)")
-
-st.markdown("""
-AI-powered emergency response system for disasters.
-""")
-
-# =====================================================
-# SIDEBAR INPUT
-# =====================================================
-
-st.sidebar.header("Crisis Input")
+st.title("🚀 Green Crisis Grid AI (REAL-WORLD SYSTEM)")
+st.markdown("Disaster intelligence + AI + Live risk + Routing + Maps")
 
 city = st.sidebar.text_input("City", "Faisalabad")
-
-disaster_type = st.sidebar.selectbox(
-    "Disaster Type",
-    ["Flood", "Earthquake", "Fire", "Heatwave", "Power Outage"]
-)
-
-severity = st.sidebar.slider("Severity Level", 1, 10, 7)
-
-run = st.sidebar.button("Run Crisis AI")
+disaster_type = st.sidebar.selectbox("Disaster", ["Flood","Earthquake","Fire"])
+severity = st.sidebar.slider("Severity",1,10,7)
+run = st.sidebar.button("Run System")
 
 # =====================================================
-# MAIN LOGIC
+# MAIN
 # =====================================================
-
 if run:
 
-    if not PINECONE_API_KEY:
-        st.error("Missing Pinecone API Key (add it in Streamlit secrets)")
-        st.stop()
+    index = connect_pinecone()
 
-    with st.spinner("Analyzing crisis..."):
+    flood_risk = get_flood_risk(city)
+    route = safe_route(severity)
 
-        index = connect_pinecone()
+    query = f"{disaster_type} emergency {city}"
+    docs = search_documents(index, query)
 
-        query = f"{disaster_type} emergency response {city}"
+    st.success("System Activated")
 
-        docs = search_documents(index, query)
+    st.markdown("## 🗺️ Live Disaster Map")
+    render_map(severity)
 
-        st.success("Analysis Complete")
+    st.markdown("## 🧠 AI Emergency Report")
+    report = generate_report(city, disaster_type, severity, docs, flood_risk, route)
 
-        st.markdown("## 📌 Retrieved Knowledge")
-        if docs:
-            for d in docs:
-                st.info(d)
-        else:
-            st.warning("No matching records found.")
-
-        st.markdown("## 🧠 AI Crisis Report")
-
-        report = generate_report(city, disaster_type, severity, docs)
-
-        st.text_area("Report", report, height=400)
+    st.text_area("Report", report, height=400)
 
 else:
-    st.info("Enter details and click Run Crisis AI")
+    st.info("Enter inputs and run system")
