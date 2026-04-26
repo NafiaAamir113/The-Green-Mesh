@@ -186,7 +186,7 @@ def search_documents(index, query):
         results = index.search(
             namespace="default",
             query=query,
-            top_k=3
+            limit=3
         )
 
         retrieved_docs = []
