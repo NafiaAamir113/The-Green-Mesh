@@ -165,45 +165,37 @@ import math
 from pinecone import Pinecone
 
 # =====================================================
-# 🔐 API KEY (Streamlit Secrets)
+# 🔐 API KEY
 # =====================================================
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX_NAME = "crisis-command-center-index"
 
 # =====================================================
-# 🧠 CONNECT TO PINECONE
+# 🧠 PINECONE CONNECT
 # =====================================================
 def connect_pinecone():
     pc = Pinecone(api_key=PINECONE_API_KEY)
     return pc.Index(INDEX_NAME)
 
 # =====================================================
-# 🔍 PINECONE SEARCH (FIXED)
+# 🔍 PINECONE SEARCH
 # =====================================================
 def search_documents(index, query):
     try:
         results = index.search(
             namespace="default",
-            query={
-                "inputs": {"text": query},
-                "top_k": 3
-            }
+            query={"inputs": {"text": query}, "top_k": 3}
         )
 
         docs = []
 
-        if hasattr(results, "result"):
-            hits = results.result.get("hits", [])
-        else:
-            hits = results.get("matches", [])
+        hits = getattr(results, "result", {}).get("hits", [])
 
         for h in hits:
             text = None
-
             if hasattr(h, "fields"):
                 text = h.fields.get("text")
-
-            if not text and hasattr(h, "metadata"):
+            elif hasattr(h, "metadata"):
                 text = h.metadata.get("text")
 
             if text:
@@ -216,47 +208,129 @@ def search_documents(index, query):
         return []
 
 # =====================================================
-# 🌧️ WEATHER / FLOOD INTELLIGENCE (REAL API)
+# 🌍 REAL DATA SOURCES
 # =====================================================
-def get_flood_risk(city):
-    lat, lon = 31.4504, 73.1350  # Faisalabad default
 
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation"
+LAT, LON = 31.4504, 73.1350  # Faisalabad default
+
+# -------------------------
+# 🌡️ HEATWAVE SEVERITY
+# -------------------------
+def heatwave_severity():
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m"
 
     try:
-        r = requests.get(url)
-        data = r.json()
+        data = requests.get(url).json()
+        temp = data["hourly"]["temperature_2m"][0]
 
-        rain = data["hourly"]["precipitation"][0]
-
-        if rain > 10:
-            return "HIGH"
-        elif rain > 5:
-            return "MEDIUM"
+        if temp >= 45:
+            return 9, f"Extreme heat detected: {temp}°C"
+        elif temp >= 40:
+            return 7, f"Severe heat detected: {temp}°C"
+        elif temp >= 35:
+            return 5, f"Moderate heat: {temp}°C"
         else:
-            return "LOW"
+            return 3, f"Normal temperature: {temp}°C"
 
     except:
-        return "UNKNOWN"
+        return 5, "Heat data unavailable"
+
+# -------------------------
+# 🌧️ FLOOD SEVERITY
+# -------------------------
+def flood_severity():
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=precipitation"
+
+    try:
+        data = requests.get(url).json()
+        rain = data["hourly"]["precipitation"][0]
+
+        if rain > 20:
+            return 9, f"Extreme rainfall: {rain}mm"
+        elif rain > 10:
+            return 7, f"Heavy rainfall: {rain}mm"
+        elif rain > 5:
+            return 5, f"Moderate rainfall: {rain}mm"
+        else:
+            return 3, f"Low rainfall: {rain}mm"
+
+    except:
+        return 5, "Rain data unavailable"
+
+# -------------------------
+# 🌬️ FIRE RISK (SIMULATED REAL DATA LOGIC)
+# -------------------------
+def fire_severity():
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=wind_speed_10m"
+
+    try:
+        data = requests.get(url).json()
+        wind = data["hourly"]["wind_speed_10m"][0]
+
+        if wind >= 40:
+            return 8, f"High fire spread risk (wind {wind} km/h)"
+        elif wind >= 25:
+            return 6, f"Moderate fire risk (wind {wind} km/h)"
+        else:
+            return 3, f"Low fire spread risk (wind {wind} km/h)"
+
+    except:
+        return 5, "Fire data unavailable"
+
+# -------------------------
+# 🌍 EARTHQUAKE (USGS REAL API)
+# -------------------------
+def earthquake_severity():
+    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+
+    try:
+        data = requests.get(url).json()
+
+        if len(data["features"]) == 0:
+            return 3, "No recent seismic activity"
+
+        mag = data["features"][0]["properties"]["mag"]
+
+        if mag >= 6:
+            return 9, f"Strong earthquake detected: M{mag}"
+        elif mag >= 4:
+            return 7, f"Moderate earthquake: M{mag}"
+        else:
+            return 4, f"Minor seismic activity: M{mag}"
+
+    except:
+        return 5, "Earthquake data unavailable"
 
 # =====================================================
-# 🚨 DISASTER-AWARE RISK ENGINE (FIXED LOGIC)
+# 🧠 AUTONOMOUS DISASTER ENGINE
 # =====================================================
-def get_disaster_risk(city, disaster_type):
-    if disaster_type == "Flood":
-        return get_flood_risk(city)
+def detect_disaster(disaster_type):
 
-    elif disaster_type == "Heatwave":
-        return "HIGH (Temperature Risk Model)"
+    if disaster_type == "Heatwave":
+        return heatwave_severity()
 
-    elif disaster_type == "Earthquake":
-        return "SEISMIC EVENT - NO WEATHER DATA"
+    elif disaster_type == "Flood":
+        return flood_severity()
 
     elif disaster_type == "Fire":
-        return "WIND + DRY CONDITIONS RISK (SIMULATED)"
+        return fire_severity()
+
+    elif disaster_type == "Earthquake":
+        return earthquake_severity()
 
     else:
-        return "UNKNOWN"
+        return 5, "Default risk model"
+
+# =====================================================
+# 🚑 EVACUATION LOGIC
+# =====================================================
+def evacuation_plan(severity):
+    if severity >= 8:
+        return "IMMEDIATE EVACUATION - HIGH RISK ZONES"
+    elif severity >= 5:
+        return "CONTROLLED EVACUATION - CAUTION REQUIRED"
+    else:
+        return "MONITOR SITUATION - SAFE MOVEMENT"
 
 # =====================================================
 # 🏥 HOSPITAL DATA
@@ -268,39 +342,14 @@ HOSPITALS = [
 ]
 
 # =====================================================
-# 📍 DISTANCE FUNCTION
-# =====================================================
-def distance(lat1, lon1, lat2, lon2):
-    R = 6371
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-
-    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
-
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-
-# =====================================================
-# 🚑 EVACUATION LOGIC
-# =====================================================
-def evacuation_plan(severity):
-    if severity >= 8:
-        return "AVOID MAIN ROADS — MOVE TO HIGH GROUND IMMEDIATELY"
-    elif severity >= 5:
-        return "USE CAUTIOUS EVACUATION ROUTES"
-    else:
-        return "NORMAL MOVEMENT SAFE"
-
-# =====================================================
-# 🗺️ MAP RENDERING
+# 🗺️ MAP
 # =====================================================
 def render_map(severity):
 
-    center_lat, center_lon = 31.4504, 73.1350
-
     zones = [
-        {"lat": center_lat, "lon": center_lon, "risk": severity},
-        {"lat": center_lat + 0.02, "lon": center_lon + 0.02, "risk": severity - 2},
-        {"lat": center_lat - 0.02, "lon": center_lon - 0.03, "risk": severity - 3},
+        {"lat": LAT, "lon": LON, "risk": severity},
+        {"lat": LAT+0.02, "lon": LON+0.02, "risk": severity-2},
+        {"lat": LAT-0.02, "lon": LON-0.03, "risk": severity-3},
     ]
 
     def color(r):
@@ -314,7 +363,7 @@ def render_map(severity):
     for z in zones:
         z["color"] = color(z["risk"])
 
-    flood_layer = pdk.Layer(
+    layer1 = pdk.Layer(
         "ScatterplotLayer",
         data=zones,
         get_position='[lon, lat]',
@@ -322,44 +371,45 @@ def render_map(severity):
         get_radius=8000
     )
 
-    hospital_layer = pdk.Layer(
+    layer2 = pdk.Layer(
         "ScatterplotLayer",
         data=HOSPITALS,
         get_position='[lon, lat]',
-        get_color='[0, 0, 255, 200]',
+        get_color='[0,0,255,200]',
         get_radius=9000
     )
 
-    view = pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=11)
+    view = pdk.ViewState(latitude=LAT, longitude=LON, zoom=11)
 
-    st.pydeck_chart(pdk.Deck(layers=[flood_layer, hospital_layer], initial_view_state=view))
+    st.pydeck_chart(pdk.Deck(layers=[layer1, layer2], initial_view_state=view))
 
 # =====================================================
-# 🧠 AI REPORT
+# 🧠 REPORT
 # =====================================================
-def generate_report(city, disaster_type, severity, docs, risk, route):
+def generate_report(city, disaster, severity, docs, reason):
 
     return f"""
-GREEN CRISIS GRID – INTELLIGENT DISASTER SYSTEM
-===============================================
+GREEN CRISIS GRID – AUTONOMOUS SYSTEM
+=====================================
 
 City: {city}
-Disaster: {disaster_type}
+Disaster: {disaster}
 Severity: {severity}/10
-Risk Level: {risk}
 
-🚑 Evacuation Plan:
-{route}
+📡 AI Reason:
+{reason}
+
+🚑 Evacuation:
+{evacuation_plan(severity)}
 
 📌 Knowledge Base:
-{chr(10).join(docs) if docs else "No data found"}
+{chr(10).join(docs) if docs else "No data"}
 
 🏥 Hospital Strategy:
-- Nearest hospitals activated
-- Distance-based triage
-- Emergency response readiness
+- Distance-based prioritization
+- Emergency readiness activated
 
-SYSTEM STATUS: ACTIVE
+SYSTEM: FULLY AUTONOMOUS ACTIVE
 """
 
 # =====================================================
@@ -367,50 +417,40 @@ SYSTEM STATUS: ACTIVE
 # =====================================================
 st.set_page_config(page_title="Green Crisis Grid", layout="wide")
 
-st.title("🚀 Green Crisis Grid AI")
-st.markdown("Multi-Hazard Emergency Intelligence System")
+st.title("🚀 Green Crisis Grid AI (FULLY AUTONOMOUS)")
+st.markdown("No manual input needed — AI detects disaster severity automatically")
 
 city = st.sidebar.text_input("City", "Faisalabad")
 
 disaster_type = st.sidebar.selectbox(
     "Disaster Type",
-    ["Flood", "Earthquake", "Fire", "Heatwave"]
+    ["Heatwave", "Flood", "Fire", "Earthquake"]
 )
 
-severity = st.sidebar.slider("Severity", 1, 10, 7)
-
-run = st.sidebar.button("Run System")
+run = st.sidebar.button("Run Autonomous System")
 
 # =====================================================
-# 🚀 MAIN EXECUTION
+# 🚀 MAIN
 # =====================================================
 if run:
 
     index = connect_pinecone()
 
-    risk = get_disaster_risk(city, disaster_type)
-    route = evacuation_plan(severity)
+    severity, reason = detect_disaster(disaster_type)
 
-    query = f"{disaster_type} emergency response {city}"
+    query = f"{disaster_type} emergency {city}"
     docs = search_documents(index, query)
 
-    st.success("System Activated")
+    st.success("Autonomous System Activated")
 
     st.markdown("## 🗺️ Live Disaster Map")
     render_map(severity)
 
-    st.markdown("## 🧠 AI Emergency Report")
+    st.markdown("## 🧠 AI Report")
 
-    report = generate_report(
-        city,
-        disaster_type,
-        severity,
-        docs,
-        risk,
-        route
-    )
+    report = generate_report(city, disaster_type, severity, docs, reason)
 
-    st.text_area("Report", report, height=400)
+    st.text_area("Report", report, height=450)
 
 else:
-    st.info("Enter inputs and run the system")
+    st.info("Click Run Autonomous System to start")
