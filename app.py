@@ -296,6 +296,9 @@
 #     st.info("Click Run Autonomous System to start")
 
 
+
+
+
 import streamlit as st
 import pydeck as pdk
 import requests
@@ -308,7 +311,16 @@ from pinecone import Pinecone
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
 INDEX_NAME = "crisis-command-center-index"
 
-LAT, LON = 31.4504, 73.1350  # Faisalabad
+# =====================================================
+# 🌍 CITY DATABASE (IMPORTANT UPGRADE)
+# =====================================================
+CITIES = {
+    "Faisalabad": (31.4504, 73.1350),
+    "Lahore": (31.5204, 74.3587),
+    "Karachi": (24.8607, 67.0011),
+    "Islamabad": (33.6844, 73.0479),
+    "Multan": (30.1575, 71.5249)
+}
 
 # =====================================================
 # 🧠 PINECONE
@@ -343,11 +355,13 @@ def search_documents(index, query):
         return []
 
 # =====================================================
-# 🌍 REAL DATA MODELS
+# 🌡️ CITY-BASED DATA ENGINE
 # =====================================================
+def get_coords(city):
+    return CITIES.get(city, (31.4504, 73.1350))
 
-def heatwave_model():
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=temperature_2m"
+def heatwave_model(lat, lon):
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m"
     data = requests.get(url).json()
     temp = data["hourly"]["temperature_2m"][0]
 
@@ -360,8 +374,8 @@ def heatwave_model():
     else:
         return 3, temp, "Normal temperature"
 
-def flood_model():
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=precipitation"
+def flood_model(lat, lon):
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=precipitation"
     data = requests.get(url).json()
     rain = data["hourly"]["precipitation"][0]
 
@@ -369,13 +383,11 @@ def flood_model():
         return 9, rain, "Flash flood risk"
     elif rain > 10:
         return 7, rain, "Heavy rainfall"
-    elif rain > 5:
-        return 5, rain, "Moderate rain"
     else:
         return 3, rain, "Low rainfall"
 
-def fire_model():
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={LAT}&longitude={LON}&hourly=wind_speed_10m"
+def fire_model(lat, lon):
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=wind_speed_10m"
     data = requests.get(url).json()
     wind = data["hourly"]["wind_speed_10m"][0]
 
@@ -403,28 +415,38 @@ def earthquake_model():
         return 4, mag, "Minor tremors"
 
 # =====================================================
-# 🧠 AUTONOMOUS ENGINE
+# 🧠 AUTONOMOUS ENGINE (CITY-AWARE)
 # =====================================================
-def detect(disaster):
+def detect(disaster, lat, lon):
     if disaster == "Heatwave":
-        return heatwave_model()
+        return heatwave_model(lat, lon)
     elif disaster == "Flood":
-        return flood_model()
+        return flood_model(lat, lon)
     elif disaster == "Fire":
-        return fire_model()
+        return fire_model(lat, lon)
     elif disaster == "Earthquake":
         return earthquake_model()
     else:
-        return 5, 0, "Unknown condition"
+        return 5, 0, "Unknown"
 
 # =====================================================
-# 🏥 HOSPITAL INTELLIGENCE (WINNING FEATURE)
+# 🏥 HOSPITAL SYSTEM (CITY-BASED)
 # =====================================================
-HOSPITALS = [
-    {"name": "Allied Hospital", "lat": 31.4180, "lon": 73.0790},
-    {"name": "DHQ Hospital", "lat": 31.4150, "lon": 73.0890},
-    {"name": "Faisal Hospital", "lat": 31.4300, "lon": 73.1100},
-]
+HOSPITALS = {
+    "Faisalabad": [
+        {"name": "Allied Hospital", "lat": 31.4180, "lon": 73.0790},
+        {"name": "DHQ Hospital", "lat": 31.4150, "lon": 73.0890},
+        {"name": "Faisal Hospital", "lat": 31.4300, "lon": 73.1100},
+    ],
+    "Lahore": [
+        {"name": "Mayo Hospital", "lat": 31.5651, "lon": 74.3142},
+        {"name": "Jinnah Hospital", "lat": 31.4697, "lon": 74.2867},
+    ],
+    "Karachi": [
+        {"name": "JPMC", "lat": 24.8600, "lon": 67.0100},
+        {"name": "Civil Hospital", "lat": 24.8550, "lon": 67.0300},
+    ],
+}
 
 def distance(a, b, c, d):
     R = 6371
@@ -433,42 +455,45 @@ def distance(a, b, c, d):
     x = math.sin(dlat/2)**2 + math.cos(math.radians(a)) * math.cos(math.radians(c)) * math.sin(dlon/2)**2
     return R * 2 * math.atan2(math.sqrt(x), math.sqrt(1-x))
 
-def rank_hospitals():
+def rank_hospitals(city, lat, lon):
+    hosps = HOSPITALS.get(city, HOSPITALS["Faisalabad"])
     ranked = []
-    for h in HOSPITALS:
-        dist = distance(LAT, LON, h["lat"], h["lon"])
-        ranked.append((h["name"], round(dist, 2)))
+
+    for h in hosps:
+        d = distance(lat, lon, h["lat"], h["lon"])
+        ranked.append((h["name"], round(d, 2)))
+
     return sorted(ranked, key=lambda x: x[1])
 
 # =====================================================
-# 🚑 EVACUATION ENGINE (IMPROVED)
+# 🚑 EVACUATION
 # =====================================================
 def evacuation(severity):
     if severity >= 8:
-        return "CRITICAL EVACUATION — IMMEDIATE ACTION REQUIRED"
+        return "CRITICAL EVACUATION REQUIRED"
     elif severity >= 5:
-        return "CONTROLLED EVACUATION — HIGH ALERT"
+        return "CONTROLLED EVACUATION"
     else:
-        return "NORMAL MONITORING — SAFE"
+        return "MONITORING SAFE"
 
 # =====================================================
-# 🗺️ MAP (IMPACT VERSION)
+# 🗺️ MAP
 # =====================================================
-def render_map(severity):
+def render_map(lat, lon, severity, hospitals):
 
     zones = [
-        {"lat": LAT, "lon": LON, "risk": severity},
-        {"lat": LAT+0.02, "lon": LON+0.02, "risk": severity-2},
-        {"lat": LAT-0.02, "lon": LON-0.03, "risk": severity-3},
+        {"lat": lat, "lon": lon, "risk": severity},
+        {"lat": lat+0.02, "lon": lon+0.02, "risk": severity-2},
+        {"lat": lat-0.02, "lon": lon-0.03, "risk": severity-3},
     ]
 
     def color(r):
         if r >= 8:
             return [255, 0, 0, 200]
         elif r >= 5:
-            return [255, 140, 0, 180]
+            return [255, 165, 0, 160]
         else:
-            return [0, 255, 0, 140]
+            return [0, 255, 0, 120]
 
     for z in zones:
         z["color"] = color(z["risk"])
@@ -483,41 +508,43 @@ def render_map(severity):
 
     layer2 = pdk.Layer(
         "ScatterplotLayer",
-        data=HOSPITALS,
+        data=[{"lat": h[0], "lon": h[1]} for h in []],
         get_position='[lon, lat]',
         get_color='[0,0,255,200]',
         get_radius=10000
     )
 
-    st.pydeck_chart(pdk.Deck(layers=[layer1, layer2],
-        initial_view_state=pdk.ViewState(latitude=LAT, longitude=LON, zoom=11)))
+    st.pydeck_chart(pdk.Deck(
+        layers=[layer1],
+        initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=11)
+    ))
 
 # =====================================================
-# 🧠 FINAL AI REPORT (WINNING FORMAT)
+# 🧠 REPORT (CITY LOCKED)
 # =====================================================
 def report(city, disaster, severity, reason, docs, hospitals):
 
     return f"""
-🚨 GREEN CRISIS GRID — EMERGENCY COMMAND SYSTEM
-================================================
+🚨 GREEN CRISIS GRID — CITY INTELLIGENCE REPORT
+=============================================
 
-📍 Location: {city}
+📍 City: {city}
 ⚠️ Disaster: {disaster}
-📊 Severity Score: {severity}/10
+📊 Severity: {severity}/10
 
 🧠 AI ANALYSIS:
 {reason}
 
-🚑 EVACUATION STATUS:
+🚑 EVACUATION:
 {evacuation(severity)}
 
-🏥 HOSPITAL PRIORITY LIST:
+🏥 HOSPITAL PRIORITY:
 {chr(10).join([f"{i+1}. {h[0]} ({h[1]} km)" for i,h in enumerate(hospitals)])}
 
-📡 INTELLIGENCE FEED:
-{chr(10).join(docs) if docs else "No relevant data"}
+📡 INTELLIGENCE:
+{chr(10).join(docs) if docs else "No data"}
 
-🟢 SYSTEM STATUS: AUTONOMOUS ACTIVE
+SYSTEM: CITY-SPECIFIC AUTONOMOUS MODE ACTIVE
 """
 
 # =====================================================
@@ -527,34 +554,36 @@ st.set_page_config(page_title="Green Crisis Grid", layout="wide")
 
 st.title("🚀 Green Crisis Grid AI — WINNING VERSION")
 
-city = st.sidebar.text_input("City", "Faisalabad")
+city = st.sidebar.selectbox("Select City", list(CITIES.keys()))
 disaster = st.sidebar.selectbox("Disaster", ["Heatwave","Flood","Fire","Earthquake"])
-run = st.sidebar.button("RUN EMERGENCY SYSTEM")
+run = st.sidebar.button("RUN SYSTEM")
 
 # =====================================================
-# 🚀 RUN
+# 🚀 EXECUTION
 # =====================================================
 if run:
 
+    lat, lon = get_coords(city)
+
     index = connect_pinecone()
 
-    severity, value, reason = detect(disaster)
+    severity, value, reason = detect(disaster, lat, lon)
 
     query = f"{disaster} emergency {city}"
     docs = search_documents(index, query)
 
-    hospitals = rank_hospitals()
+    hospitals = rank_hospitals(city, lat, lon)
 
     st.success("SYSTEM ACTIVE")
 
-    st.markdown("## 🗺️ LIVE DISASTER MAP")
-    render_map(severity)
+    st.markdown("## 🗺️ MAP")
+    render_map(lat, lon, severity, hospitals)
 
-    st.markdown("## 🧠 EMERGENCY REPORT")
+    st.markdown("## 🧠 REPORT")
 
-    final_report = report(city, disaster, severity, reason, docs, hospitals)
+    final = report(city, disaster, severity, reason, docs, hospitals)
 
-    st.text_area("Report", final_report, height=500)
+    st.text_area("Report", final, height=500)
 
 else:
-    st.info("Click RUN EMERGENCY SYSTEM")
+    st.info("Select city and run system")
