@@ -1,5 +1,6 @@
 streamlit
 pinecone
-google-generativeai
-pandas
 sentence-transformers
+requests
+beautifulsoup4
+pydeck
