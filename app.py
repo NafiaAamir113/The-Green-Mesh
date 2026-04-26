@@ -95,7 +95,7 @@ def get_coords(city):
     return CITIES.get(city, (31.4504, 73.1350))
 
 # =====================================================
-# 🌡️ DISASTER MODELS (unchanged)
+# 🌡️ DISASTER MODELS
 # =====================================================
 
 def heatwave_model(lat, lon):
@@ -111,6 +111,7 @@ def heatwave_model(lat, lon):
         elif temp >= 35:
             return 5, f"Moderate heat ({temp}°C)"
         return 3, f"Normal temperature ({temp}°C)"
+
     except:
         return 5, "API error"
 
@@ -125,6 +126,7 @@ def flood_model(lat, lon):
         elif rain > 10:
             return 7, f"Heavy rainfall ({rain} mm)"
         return 3, f"Low rainfall ({rain} mm)"
+
     except:
         return 5, "API error"
 
@@ -139,6 +141,7 @@ def fire_model(lat, lon):
         elif wind >= 25:
             return 6, f"Moderate fire risk ({wind})"
         return 3, f"Low fire risk ({wind})"
+
     except:
         return 5, "API error"
 
@@ -157,6 +160,7 @@ def earthquake_model():
         elif mag >= 4:
             return 7, f"Moderate earthquake (M {mag})"
         return 4, f"Minor earthquake (M {mag})"
+
     except:
         return 5, "API error"
 
@@ -203,40 +207,32 @@ def rank_hospitals(city, lat, lon):
     return sorted(result, key=lambda x: x["distance"])
 
 # =====================================================
-# 🚀 LLM
+# 🚀 LLM (FIXED)
 # =====================================================
 
 def generate_ai_report(city, disaster, severity, reason, docs, hospitals):
-    
+
     system_prompt = """
-    You are the National Disaster Crisis Command AI of Pakistan.
-    
-    You analyze NDMA data, weather conditions, and hospital readiness.
-    
-    You generate structured emergency response plans like a government Emergency Operations Center (EOC).
-    
-    You MUST follow this exact format:
-    
-    1. Risk Level
-    2. Situation Analysis
-    3. Immediate Actions
-    4. Evacuation Plan
-    5. Hospital Response
-    6. Government Advisory
-    7. Executive Summary (VERY IMPORTANT)
-    
-    RULES:
-    - Always include ALL 7 sections
-    - The Executive Summary must be 2–3 lines only
-    - Do not stop early or skip sections
-    - Be precise, operational, and non-generic
-    """
+You are the National Disaster Crisis Command AI of Pakistan.
+
+Generate structured emergency response reports.
+
+MUST INCLUDE:
+1. Risk Level
+2. Situation Analysis
+3. Immediate Actions
+4. Evacuation Plan
+5. Hospital Response
+6. Government Advisory
+7. Executive Summary (2-3 lines)
+"""
+
     user_prompt = f"""
 CITY: {city}
 DISASTER: {disaster}
 SEVERITY: {severity}/10
 
-WEATHER ANALYSIS:
+WEATHER:
 {reason}
 
 NDMA DATA:
@@ -263,13 +259,13 @@ HOSPITALS:
                 "max_tokens": 1200
             }
         )
+
         result = response.json()["choices"][0]["message"]["content"]
 
-# Ensure Executive Summary exists
-if "Executive Summary" not in result:
-    result += "\n\n7. Executive Summary:\nSituation under monitoring. No immediate escalation required."
+        if "Executive Summary" not in result:
+            result += "\n\nExecutive Summary:\nSystem is stable but monitoring required."
 
-return result
+        return result
 
     except Exception as e:
         return f"AI Error: {str(e)}"
@@ -304,8 +300,7 @@ if run:
     )
 
     st.success("System Active")
-
-    st.text_area("🧠 AI Crisis Report", ai_report, height=500)
+    st.text_area("AI Crisis Report", ai_report, height=500)
 
 else:
     st.info("Select inputs and run system")
