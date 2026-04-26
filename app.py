@@ -165,7 +165,7 @@ from pinecone import Pinecone
 # STEP 1: LOAD API KEY SAFELY (Streamlit Cloud safe)
 # =====================================================
 
-PINECONE_API_KEY = st.secrets.get("PINECONE_API_KEY", "")
+PINECONE_API_KEY = st.secrets.get("pcsk_Wj9ZQ_PBmDTQPLxpfPgzUYcKWp7bzJ4SLPfBjXwyWjax8iUUCbZdF9A3AFUS4AGLxWt29")
 
 INDEX_NAME = "crisis-command-center-index"
 
